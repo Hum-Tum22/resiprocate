@@ -45,16 +45,21 @@ enum Month {
    @ingroup sip_grammar
    @brief Represents the "SIP-date" element in the RFC 3261 grammar.
 */
+enum TmType
+{
+   reSIPDate = 0,
+   GB28181Date
+};
 class DateCategory : public ParserCategory
 {
    public:
       enum {commaHandling = NoCommaTokenizing};
 
-      DateCategory();
-      DateCategory(time_t datetime);
+      DateCategory(TmType tmtype = reSIPDate);
+      DateCategory(time_t datetime, TmType tmtype = reSIPDate);
       DateCategory(const HeaderFieldValue& hfv, 
                      Headers::Type type,
-                     PoolBase* pool=0);
+                     PoolBase* pool=0, TmType tmtype = reSIPDate);
       DateCategory(const DateCategory& orig,
                      PoolBase* pool=0);
       DateCategory& operator=(const DateCategory&);
@@ -86,6 +91,7 @@ class DateCategory : public ParserCategory
       int second() const;
 
    private:
+      enum TmType mDateType;
       enum DayOfWeek mDayOfWeek;
       int mDayOfMonth;
       enum Month mMonth;
@@ -93,6 +99,7 @@ class DateCategory : public ParserCategory
       int mHour;
       int mMin;
       int mSec;
+      int mMillisec;
 };
  
 }

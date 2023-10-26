@@ -74,7 +74,7 @@ Data resip::MonthData[] =
 };
 
 
-DateCategory::DateCategory()
+DateCategory::DateCategory(TmType tmtype)
    : ParserCategory(),
      mDayOfWeek(Sun),
      mDayOfMonth(),
@@ -83,6 +83,8 @@ DateCategory::DateCategory()
      mHour(0),
      mMin(0),
      mSec(0)
+   , mMillisec(0)
+   , mDateType(tmtype)
 {
    time_t now;
    time(&now);
@@ -97,7 +99,7 @@ DateCategory::DateCategory()
    setDatetime(now);
 }
 
-DateCategory::DateCategory(time_t datetime)
+DateCategory::DateCategory(time_t datetime, TmType tmtype)
    : ParserCategory(),
      mDayOfWeek(Sun),
      mDayOfMonth(),
@@ -106,13 +108,15 @@ DateCategory::DateCategory(time_t datetime)
      mHour(0),
      mMin(0),
      mSec(0)
+   , mMillisec(0)
+   , mDateType(tmtype)
 {
    setDatetime(datetime);
 }
 
 DateCategory::DateCategory(const HeaderFieldValue& hfv, 
                            Headers::Type type,
-                           PoolBase* pool)
+                           PoolBase* pool, TmType tmtype)
    : ParserCategory(hfv, type, pool),
      mDayOfWeek(Sun),
      mDayOfMonth(),
@@ -121,6 +125,8 @@ DateCategory::DateCategory(const HeaderFieldValue& hfv,
      mHour(0),
      mMin(0),
      mSec(0)
+   , mMillisec(0)
+   , mDateType(tmtype)
 {}
 
 DateCategory::DateCategory(const DateCategory& rhs,
@@ -133,6 +139,8 @@ DateCategory::DateCategory(const DateCategory& rhs,
      mHour(rhs.mHour),
      mMin(rhs.mMin),
      mSec(rhs.mSec)
+   , mMillisec(rhs.mMillisec)
+   , mDateType(rhs.mDateType)
 {}
 
 DateCategory&
@@ -148,6 +156,8 @@ DateCategory::operator=(const DateCategory& rhs)
       mHour = rhs.mHour;
       mMin = rhs.mMin;
       mSec = rhs.mSec;
+      mMillisec = rhs.mMillisec;
+      mDateType = rhs.mDateType;
    }
    return *this;
 }
@@ -156,8 +166,12 @@ bool
 DateCategory::setDatetime(time_t datetime)
 {
    struct tm gmt;
+   struct tm* gmtp = NULL;
 #if defined(WIN32) || defined(__sun)
-   struct tm *gmtp = gmtime(&datetime);
+   if(mDateType == reSIPDate)
+      gmtp = gmtime(&datetime);
+   else
+      gmtp = localtime(&datetime);
    if (gmtp == 0)
    {
         int e = getErrno();
@@ -167,13 +181,21 @@ DateCategory::setDatetime(time_t datetime)
    }
    memcpy(&gmt,gmtp,sizeof(gmt));
 #else
-  if (gmtime_r(&datetime, &gmt) == 0)
-  {
-     int e = getErrno();
-     DebugLog (<< "Failed to convert to gmt: " << strerror(e));
-     Transport::error(e);
-     return false;
-  }
+   if (mDateType == reSIPDate)
+   {
+      gmtp = gmtime_r(&datetime, &gmt);
+   }
+   else
+   {
+      gmtp = localtime_r(&datetime, &gmt);
+   }
+   if (gmtp == NULL)
+   {
+      int e = getErrno();
+      DebugLog(<< "Failed to convert to gmt: " << strerror(e));
+      Transport::error(e);
+      return false;
+   }
 #endif
 
    mDayOfWeek = static_cast<DayOfWeek>(gmt.tm_wday);
@@ -318,56 +340,86 @@ DateCategory::second() const
 void
 DateCategory::parse(ParseBuffer& pb)
 {
-   // Mon, 04 Nov 2002 17:34:15 GMT
-   // Note: Day of Week is optional, so this is also valid: 04 Nov 2002 17:34:15 GMT
-
-   const char* anchor = pb.skipWhitespace();
-
-   // If comma is present, then DayOfWeek is present
-   pb.skipToChar(Symbols::COMMA[0]);
-   if (!pb.eof())
+   if (mDateType == reSIPDate)
    {
-      Data dayOfWeek;
-      pb.data(dayOfWeek, anchor);
-      mDayOfWeek = DateCategory::DayOfWeekFromData(dayOfWeek);
+      // Mon, 04 Nov 2002 17:34:15 GMT
+      // Note: Day of Week is optional, so this is also valid: 04 Nov 2002 17:34:15 GMT
 
-      pb.skipChar(Symbols::COMMA[0]);
+      const char* anchor = pb.skipWhitespace();
+
+      // If comma is present, then DayOfWeek is present
+      pb.skipToChar(Symbols::COMMA[0]);
+      if (!pb.eof())
+      {
+         Data dayOfWeek;
+         pb.data(dayOfWeek, anchor);
+         mDayOfWeek = DateCategory::DayOfWeekFromData(dayOfWeek);
+
+         pb.skipChar(Symbols::COMMA[0]);
+      }
+      else
+      {
+         pb.reset(pb.start());
+         mDayOfWeek = DayOfWeek::NA;
+      }
+
+      pb.skipWhitespace();
+
+      mDayOfMonth = pb.integer();
+
+      anchor = pb.skipWhitespace();
+      pb.skipNonWhitespace();
+
+      Data month;
+      pb.data(month, anchor);
+      mMonth = DateCategory::MonthFromData(month);
+
+      pb.skipWhitespace();
+      mYear = pb.integer();
+
+      pb.skipWhitespace();
+
+      mHour = pb.integer();
+      pb.skipChar(Symbols::COLON[0]);
+      mMin = pb.integer();
+      pb.skipChar(Symbols::COLON[0]);
+      mSec = pb.integer();
+
+      pb.skipWhitespace();
+      pb.skipChar('G');
+      pb.skipChar('M');
+      pb.skipChar('T');
+
+      pb.skipWhitespace();
+      pb.assertEof();
    }
    else
    {
-      pb.reset(pb.start());
-      mDayOfWeek = DayOfWeek::NA;
+      //Date: 2022-08-24T14:27:00.250
+      const char* anchor = pb.skipWhitespace();
+      mYear = pb.integer();
+      pb.skipChar(Symbols::DASH[0]);
+
+      mMonth = (Month)pb.integer();
+      pb.skipChar(Symbols::DASH[0]);
+
+      mDayOfMonth = pb.integer();
+      pb.skipChar('T');
+
+      mHour = pb.integer();
+      pb.skipChar(Symbols::COLON[0]);
+
+      mMin = pb.integer();
+      pb.skipChar(Symbols::COLON[0]);
+
+      mSec = pb.integer();
+
+      if (!pb.eof())
+      {
+         pb.skipChar(Symbols::DOT[0]);
+         mMillisec = pb.integer();
+      }
    }
-
-   pb.skipWhitespace();
-
-   mDayOfMonth = pb.integer();
-
-   anchor = pb.skipWhitespace();
-   pb.skipNonWhitespace();
-
-   Data month;
-   pb.data(month, anchor);
-   mMonth = DateCategory::MonthFromData(month);
-
-   pb.skipWhitespace();
-   mYear = pb.integer();
-
-   pb.skipWhitespace();
-
-   mHour = pb.integer();
-   pb.skipChar(Symbols::COLON[0]);
-   mMin = pb.integer();
-   pb.skipChar(Symbols::COLON[0]);
-   mSec = pb.integer();
-
-   pb.skipWhitespace();
-   pb.skipChar('G');
-   pb.skipChar('M');
-   pb.skipChar('T');
-
-   pb.skipWhitespace();
-   pb.assertEof();
 }
 
 ParserCategory* 
@@ -396,28 +448,60 @@ static void pad2(const int x, EncodeStream& str)
    }
    str << x;
 }
+static void pad3(const int x, EncodeStream& str)
+{
+   if (x < 100)
+   {
+      str << Symbols::ZERO[0];
+      if (x < 10)
+      {
+         str << Symbols::ZERO[0];
+      }
+   }
+   str << x;
+}
 
 EncodeStream& 
 DateCategory::encodeParsed(EncodeStream& str) const
 {
-   if (mDayOfWeek != DayOfWeek::NA)
+   if (mDateType == reSIPDate)
    {
-      str << DayOfWeekData[mDayOfWeek] // Mon
-         << Symbols::COMMA[0] << Symbols::SPACE[0];
+      if (mDayOfWeek != DayOfWeek::NA)
+      {
+         str << DayOfWeekData[mDayOfWeek] // Mon
+            << Symbols::COMMA[0] << Symbols::SPACE[0];
+      }
+
+      pad2(mDayOfMonth, str);  //  04
+
+      str << Symbols::SPACE[0]
+         << MonthData[mMonth] << Symbols::SPACE[0] // Nov
+         << mYear << Symbols::SPACE[0]; // 2002
+
+      pad2(mHour, str);
+      str << Symbols::COLON[0];
+      pad2(mMin, str);
+      str << Symbols::COLON[0];
+      pad2(mSec, str);
+      str << " GMT";
+   }
+   else
+   {
+      pad2(mYear, str);
+      str << Symbols::DASH[0];
+      pad2(mMonth + 1, str);
+      str << Symbols::DASH[0];
+      pad2(mDayOfMonth, str);
+      str << 'T';
+      pad2(mHour, str);
+      str << Symbols::COLON[0];
+      pad2(mMin, str);
+      str << Symbols::COLON[0];
+      pad2(mSec, str);
+      str << Symbols::DOT[0];
+      pad3(0, str);
    }
    
-   pad2(mDayOfMonth, str);  //  04
-
-   str << Symbols::SPACE[0]
-       << MonthData[mMonth] << Symbols::SPACE[0] // Nov
-       << mYear << Symbols::SPACE[0]; // 2002
-
-   pad2(mHour, str);
-   str << Symbols::COLON[0];
-   pad2(mMin, str);
-   str << Symbols::COLON[0];
-   pad2(mSec, str);
-   str << " GMT";
 
    return str;
 }
