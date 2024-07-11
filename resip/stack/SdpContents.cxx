@@ -174,7 +174,125 @@ AttributeHelper::clearAttribute(const Data& key)
    }
    mAttributes.erase(key);
 }
+OtherAttributeHelper::OtherAttributeHelper(const OtherAttributeHelper& rhs): mAttributeList(rhs.mAttributeList),
+mAttributes(rhs.mAttributes)
+{
+}
 
+OtherAttributeHelper::OtherAttributeHelper()
+{
+}
+
+OtherAttributeHelper&
+OtherAttributeHelper::operator=(const OtherAttributeHelper& rhs)
+{
+   if (this != &rhs)
+   {
+      mAttributeList = rhs.mAttributeList;
+      mAttributes = rhs.mAttributes;
+   }
+   return *this;
+}
+
+bool
+OtherAttributeHelper::exists(const Data& key) const
+{
+   return mAttributes.find(key) != mAttributes.end();
+}
+
+const list<Data>&
+OtherAttributeHelper::getValues(const Data& key) const
+{
+   if (!exists(key))
+   {
+      static const list<Data> emptyList;
+      return emptyList;
+   }
+   return mAttributes.find(key)->second;
+}
+
+EncodeStream&
+OtherAttributeHelper::encode(EncodeStream& s) const
+{
+   for (std::list<std::pair<Data, Data> >::const_iterator i = mAttributeList.begin();
+      i != mAttributeList.end(); ++i)
+   {
+      s << i->first;
+      if (!i->second.empty())
+      {
+         s << Symbols::EQUALS[0] << i->second;
+      }
+      else
+      {
+         s << Symbols::EQUALS[0];
+      }
+      s << Symbols::CRLF;
+   }
+   return s;
+}
+
+void
+OtherAttributeHelper::parse(ParseBuffer& pb)
+{
+   while (!pb.eof() && *pb.position() == 'y')
+   {
+      Data key("y");
+      Data value;
+
+      pb.skipChar('y');
+      const char* anchor = pb.skipChar(Symbols::EQUALS[0]);
+      pb.skipToOneOf(Symbols::COLON, Symbols::CRLF);
+      if (!pb.eof())
+      {
+         pb.data(value, anchor);
+      }
+
+      if (!pb.eof()) skipEol(pb);
+
+      mAttributeList.push_back(std::make_pair(key, value));
+      mAttributes[key].push_back(value);
+   }
+   while (!pb.eof() && *pb.position() == 'f')
+   {
+      Data key("f");
+      Data value;
+
+      pb.skipChar('f');
+      const char* anchor = pb.skipChar(Symbols::EQUALS[0]);
+      pb.skipToOneOf(Symbols::COLON, Symbols::CRLF);
+      if (!pb.eof())
+      {
+         pb.data(value, anchor);
+      }
+
+      if (!pb.eof()) skipEol(pb);
+
+      mAttributeList.push_back(std::make_pair(key, value));
+      mAttributes[key].push_back(value);
+   }
+}
+
+void
+OtherAttributeHelper::addAttribute(const Data& key, const Data& value)
+{
+   mAttributeList.push_back(std::make_pair(key, value));
+   mAttributes[key].push_back(value);
+}
+
+void
+OtherAttributeHelper::clearAttribute(const Data& key)
+{
+   for (std::list<std::pair<Data, Data> >::iterator i = mAttributeList.begin();
+      i != mAttributeList.end(); )
+   {
+      std::list<std::pair<Data, Data> >::iterator j = i++;
+      if (j->first == key)
+      {
+         mAttributeList.erase(j);
+      }
+   }
+   mAttributes.erase(key);
+}
 SdpContents::SdpContents() : Contents(getStaticType())
 {
 }
@@ -996,6 +1114,7 @@ SdpContents::Session::operator=(const Session& rhs)
       {
          i->setSession(this);
       }
+      mOtherAttributeHelper = rhs.mOtherAttributeHelper;
    }
    return *this;
 }
@@ -1079,6 +1198,7 @@ SdpContents::Session::parse(ParseBuffer& pb)
       addMedium(Medium());
       mMedia.back().parse(pb);
    }
+   mOtherAttributeHelper.parse(pb);
 }
 
 EncodeStream&
@@ -1150,15 +1270,15 @@ SdpContents::Session::encode(EncodeStream& s) const
    {
       i->encode(s);
    }
-
+   mOtherAttributeHelper.encode(s);
    return s;
 }
 
-std::list<std::reference_wrapper<SdpContents::Session::Medium>>
-SdpContents::Session::getMediaByType(const Data& type)
+std::list<std::reference_wrapper<const SdpContents::Session::Medium>>
+SdpContents::Session::getMediaByType(const Data& type) const
 {
-   std::list<std::reference_wrapper<SdpContents::Session::Medium>> r;
-   std::for_each(mMedia.begin(), mMedia.end(), [&r, &type](SdpContents::Session::Medium& m){
+   std::list<std::reference_wrapper<const SdpContents::Session::Medium>> r;
+   std::for_each(mMedia.cbegin(), mMedia.cend(), [&r, &type](const SdpContents::Session::Medium& m){
       if(m.name() == type)
       {
          r.push_back(std::ref(m));

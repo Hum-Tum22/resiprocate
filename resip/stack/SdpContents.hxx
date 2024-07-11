@@ -5,7 +5,6 @@
 #include <vector>
 #include <list>
 #include <iosfwd>
-#include <map>
 #include <memory>
 
 #include "resip/stack/Contents.hxx"
@@ -38,6 +37,24 @@ class AttributeHelper
    private:
       std::list<std::pair<Data, Data> > mAttributeList;  // used to ensure attribute ordering on encode
       HashMap< Data, std::list<Data> > mAttributes;
+};
+class OtherAttributeHelper
+{
+public:
+   RESIP_HeapCount(OtherAttributeHelper);
+   OtherAttributeHelper();
+   OtherAttributeHelper(const OtherAttributeHelper& rhs);
+   OtherAttributeHelper& operator=(const OtherAttributeHelper& rhs);
+
+   bool exists(const Data& key) const;
+   const std::list<Data>& getValues(const Data& key) const;
+   EncodeStream& encode(EncodeStream& s) const;
+   void parse(ParseBuffer& pb);
+   void addAttribute(const Data& key, const Data& value = Data::Empty);
+   void clearAttribute(const Data& key);
+private:
+   std::list<std::pair<Data, Data> > mAttributeList;  // used to ensure attribute ordering on encode
+   HashMap< Data, std::list<Data> > mAttributes;
 };
 
 /**
@@ -1001,7 +1018,7 @@ class SdpContents : public Contents
               * @param type the type
               * @return Media lines
               */
-            std::list<std::reference_wrapper<Medium>> getMediaByType(const Data& type);
+            std::list<std::reference_wrapper<const Medium>> getMediaByType(const Data& type) const;
 
             /** @brief add an e= (email) line to session
               * 
@@ -1064,6 +1081,9 @@ class SdpContents : public Contents
               * @return list of values for given key
               **/
             const std::list<Data>& getValues(const Data& key) const;
+
+            const OtherAttributeHelper& OtherAttrHelper() const { return mOtherAttributeHelper; }
+            OtherAttributeHelper& OtherAttrHelper() { return mOtherAttributeHelper; }
 
             const Direction& getDirection() const;
             /** @brief examine direction for streams of given types
@@ -1137,6 +1157,7 @@ class SdpContents : public Contents
             Timezones mTimezones;
             Encryption mEncryption;
             AttributeHelper mAttributeHelper;
+            OtherAttributeHelper mOtherAttributeHelper;
 
             friend class SdpContents;
       };
